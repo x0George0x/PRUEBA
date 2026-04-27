@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba de APIs de vuelo - N342AV</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #0a1628;
+            color: #e8f0fe;
+            padding: 20px;
+        }
+        button {
+            background: #3498db;
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover { background: #f0b429; color: #0a1628; }
+        pre {
+            background: #0d1f38;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .exito { border-left: 4px solid #27ae60; }
+        .error { border-left: 4px solid #e74c3c; }
+        hr { border-color: #333; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Probador de APIs de vuelo</h1>
+    <p>Matrícula fija: <strong>N342AV</strong></p>
+
+    <div>
+        <button id="btnAdsb">✈️ Probar ADS-B Exchange (adsb.fi)</button>
+        <button id="btnAeroDataBox">📡 Probar AeroDataBox (requiere API key)</button>
+    </div>
+
+    <h3>Resultado:</h3>
+    <pre id="resultado">Presiona un botón...</pre>
+
+    <script>
+        const resultado = document.getElementById('resultado');
+        const MATRICULA = 'N342AV';
+
+        // ──────────────────────────────────────────────
+        // ADS-B Exchange (gratis, sin API key)
+        // ──────────────────────────────────────────────
+        async function testAdsbExchange() {
+            resultado.innerHTML = '🔄 Consultando ADS-B Exchange...';
+            const url = `https://opendata.adsb.fi/api/v2/registration/${MATRICULA}`;
+            try {
+                const respuesta = await fetch(url);
+                if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
+                const datos = await respuesta.json();
+
+                if (datos.ac && datos.ac.length > 0) {
+                    const vuelo = datos.ac[0];
+                    resultado.innerHTML = `
+✅ VUELO ENCONTRADO en ADS-B Exchange
+✈️ Callsign: ${vuelo.flight || 'N/A'}
+📍 Posición: ${vuelo.lat}, ${vuelo.lon}
+⬆️ Altitud: ${vuelo.alt_baro || 'N/A'} ft
+⚡ Velocidad: ${vuelo.gs || 'N/A'} kt
+🔄 Estado: ${vuelo.alt_baro === 'ground' ? 'En tierra' : 'En vuelo'}
+                    `;
+                    resultado.className = 'exito';
+                } else {
+                    resultado.innerHTML = `❌ No se encontró la matrícula ${MATRICULA} en este momento (puede que no esté activa).`;
+                    resultado.className = 'error';
+                }
+            } catch (err) {
+                resultado.innerHTML = `❌ Error de conexión o CORS: ${err.message}\n\nRecuerda que esta API puede tener restricciones CORS en el navegador.`;
+                resultado.className = 'error';
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // AeroDataBox (requiere API key de RapidAPI)
+        // ──────────────────────────────────────────────
+        function pedirApiKey() {
+            let key = prompt(
+                "Introduce tu API Key de RapidAPI para AeroDataBox.\n\n" +
+                "1. Ve a https://rapidapi.com/aerodatabox/api/aerodatabox\n" +
+                "2. Regístrate y suscríbete al plan básico gratuito\n" +
+                "3. Copia tu clave 'X-RapidAPI-Key'\n\n" +
+                "¿Cuál es tu API Key?"
+            );
+            return key ? key.trim() : null;
+        }
+
+        async function testAeroDataBox() {
+            let apiKey = localStorage.getItem('aerodatabox_key');
+            if (!apiKey) {
+                apiKey = pedirApiKey();
+                if (apiKey) localStorage.setItem('aerodatabox_key', apiKey);
+                else {
+                    resultado.innerHTML = '❌ No se proporcionó API Key. No se puede consultar AeroDataBox.';
+                    resultado.className = 'error';
+                    return;
+                }
+            }
+
+            resultado.innerHTML = '🔄 Consultando AeroDataBox...';
+            const url = `https://aerodatabox.p.rapidapi.com/flights/live/registration/${MATRICULA}`;
+            try {
+                const respuesta = await fetch(url, {
+                    headers: {
+                        'X-RapidAPI-Key': apiKey,
+                        'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com'
+                    }
+                });
+                
+                if (!respuesta.ok) {
+                    if (respuesta.status === 403) {
+                        throw new Error('API Key inválida o no autorizada. Puedes borrar la clave guardada recargando la página y volviendo a introducirla.');
+                    }
+                    throw new Error(`HTTP ${respuesta.status}`);
+                }
+
+                const datos = await respuesta.json();
+                if (datos && datos.length > 0) {
+                    const vuelo = datos[0];
+                    resultado.innerHTML = `
+✅ VUELO ENCONTRADO en AeroDataBox
+✈️ Callsign: ${vuelo.callsign || 'N/A'}
+📍 Posición: ${vuelo.lat}, ${vuelo.lon}
+⬆️ Altitud: ${vuelo.altitude || 'N/A'} ft
+⚡ Velocidad: ${vuelo.speed || 'N/A'} kt
+🔄 Estado: ${vuelo.groundSpeed === 0 ? 'En tierra' : 'En vuelo'}
+                    `;
+                    resultado.className = 'exito';
+                } else {
+                    resultado.innerHTML = `❌ No se encontró la matrícula ${MATRICULA} en AeroDataBox (activos ahora mismo).`;
+                    resultado.className = 'error';
+                }
+            } catch (err) {
+                resultado.innerHTML = `❌ Error: ${err.message}\n\nSi el error persiste, puede deberse a CORS (el servicio no permite consultas desde navegador) o a que la matrícula no está activa.`;
+                resultado.className = 'error';
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // Eventos
+        // ──────────────────────────────────────────────
+        document.getElementById('btnAdsb').addEventListener('click', testAdsbExchange);
+        document.getElementById('btnAeroDataBox').addEventListener('click', testAeroDataBox);
+    </script>
+</body>
+</html>
